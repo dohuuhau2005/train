@@ -1,0 +1,54 @@
+Khi tôi bung vector $Z$ ra thành 256 kênh (channels) rồi kẹp chung với cái Mask (chỉ có 3 kênh), thằng $Z$ mang quá nhiều sức mạnh nhiễu (256 kênh) đã "đè bẹp" và "làm mù" hoàn toàn thông tin của cái Mask. Hậu quả là con AI lờ luôn cái khuôn não, nó chỉ lo vẽ ra một cái hình vuông đầy nhiễu ngẫu nhiên.
+BỘ KỸ THUẬT TỐI ƯU TOÀN DIỆN (THE ULTIMATE PIPELINE)
+Giai đoạn 1: Tiền xử lý "Sạch và Sắc" (Robust Preprocessing)
+Đây là nền móng. Dữ liệu rác thì AI học cũng ra rác. Thay vì chỉ đưa về 0-255 như Min-Max, ta sẽ làm chuẩn y khoa:
+
+Tách nền và Chuẩn hóa Z-score (Z-score Normalization): Chỉ tính toán Mean và Std trên vùng có nhu mô não, bỏ qua hoàn toàn vùng nền đen xung quanh. Điều này giúp đồng bộ độ tương phản của các khối u từ nhiều máy chụp khác nhau cực kỳ sắc nét.  
+
+Cắt vùng quan tâm (Crop ROI): Tự động tìm bounding box bao quanh sọ não và cắt bỏ phần không gian đen thừa thãi. Điều này ép mô hình (Attention U-Net) chỉ tập trung ánh nhìn vào não, không tốn nơ-ron để học "màu đen".  
+
+Lọc dữ liệu rác (Blank Slice Filtering): Khi thái từ 3D sang 2D, mạnh dạn vứt bỏ các lát cắt không có khối u hoặc khối u quá nhỏ (dưới 10-100 pixels). Việc này giúp cân bằng lớp (Class Balance), tránh việc mô hình bị "lười" và dự đoán toàn màu đen.  
+
+Giai đoạn 2: Tăng cường Dữ liệu Kép (Dual-Augmentation Strategy)
+Đây là "át chủ bài" giúp mô hình có khả năng tổng quát hóa cực mạnh, vượt qua cả các bộ dữ liệu nhỏ. Ta dùng chiến thuật "Kẹp chả":
+
+Lớp 1 - Tăng cường Sinh học (Generative Augmentation):
+
+Sử dụng Conditional VAE (CVAE) đã tự build.  
+
+Lấy các Mask thực tế làm "khuôn" (điều kiện) để ép CVAE sinh ra các Ảnh MRI giả lập tương ứng.  
+
+Hiệu quả: Xóa bỏ sự khan hiếm dữ liệu, tạo ra các "nhiễu có ích" giúp U-Net học được bản chất khối u thay vì học thuộc lòng ảnh.  
+
+Lớp 2 - Tăng cường Trên Băng Chuyền (On-the-fly Augmentation):
+
+Không lưu ảnh ra ổ cứng, mà tích hợp thẳng vào hàm tf.data.Dataset lúc train để sinh ra độ ngẫu nhiên liên tục ở mỗi Epoch.
+
+Kỹ thuật áp dụng:
+
+Lật ngẫu nhiên ngang/dọc (Random Flips).  
+
+Xoay góc nhỏ (Small Rotations).  
+
+Đặc biệt: Biến dạng đàn hồi (Elastic Deformation) để mô phỏng hình dạng méo mó tự nhiên của khối u đang chèn ép não.  
+
+Chỉnh biên độ sáng/tối nhẹ (Intensity Shift).  
+
+Giai đoạn 3: Huấn luyện "Ép Khung" (Optimized Training)
+Phần cứng có hạn nhưng muốn hiệu suất như A100? Ta dùng kỹ thuật phần mềm để gánh phần cứng.
+
+Hàm Loss Đa Kênh (Multi-head BCE + Dice Loss):
+
+Sử dụng hàm kết hợp giữa Binary Cross-Entropy (BCE) để phân loại từng pixel và Dice Loss để tối ưu hóa sự giao nhau của ranh giới.  
+
+Cực kỳ quan trọng để bắt mô hình phải học kỹ các vùng u nhỏ (Tumor Core, Enhancing Tumor) vốn hay bị vùng nền đè bẹp.
+
+Tối ưu Tài nguyên (Hardware Optimization):
+
+Bật Mixed Precision (fp16): Giảm 50% VRAM, tăng gấp rưỡi tốc độ train.
+
+Dùng tf.data.AUTOTUNE (Prefetch/Cache): Chống nghẽn cổ chai lúc đọc từ ổ cứng lên GPU.
+
+Điều hướng Tốc độ học (Learning Rate Scheduler):
+
+Sử dụng ReduceLROnPlateau: Khi mô hình bị kẹt (loss không giảm), tự động chia đôi tốc độ học để AI dùng "dao tỉa" đi những bước nhỏ hơn, rà sát đáy của hàm loss.
